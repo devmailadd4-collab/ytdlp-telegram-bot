@@ -1,0 +1,24 @@
+name: Download and Upload
+on:
+  repository_dispatch:
+    types: [new_download]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install tools
+        run: |
+          pip install -U yt-dlp
+          curl https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "${{ secrets.RCLONE_CONF }}" > ~/.config/rclone/rclone.conf
+
+      - name: Download
+        run: yt-dlp -o "%(title)s.%(ext)s" "${{ github.event.client_payload.url }}"
+
+      - name: Upload
+        run: rclone move . gdrive:Videos --include "*.mp4" --include "*.webm"
