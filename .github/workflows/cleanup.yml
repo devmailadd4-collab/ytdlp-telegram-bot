@@ -1,0 +1,18 @@
+name: Cleanup workflow runs
+on:
+  schedule:
+    - cron: '0 3 * * *'   # tous les jours à 3h UTC
+  workflow_dispatch: {}     # + bouton manuel "Run workflow"
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          retain_days: 1          # garde 1 jour d'historique
+          keep_minimum_runs: 3    # garde toujours les 3 derniers, même si vieux
