@@ -21,4 +21,4 @@ jobs:
         run: yt-dlp -o "%(title)s.%(ext)s" "${{ github.event.client_payload.url }}"
 
       - name: Upload
-        run: rclone move . gdrive:Videos --include "*.mp4" --include "*.webm"
+        run: rclone move . mega_bot:Videos --include "*.mp4" --include "*.webm"
