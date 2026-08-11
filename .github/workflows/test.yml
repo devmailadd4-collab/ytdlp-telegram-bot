@@ -1,0 +1,134 @@
+name: yt-dlp - Real Download Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL à tester"
+        required: true
+        type: string
+
+jobs:
+  test-download:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install yt-dlp and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            "yt-dlp==2026.07.04" \
+            "curl-cffi==0.15.0" \
+            "yt-dlp-ejs==0.8.0"
+
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.5"
+
+      - name: Diagnostic environment
+        env:
+          URL: ${{ inputs.url }}
+        run: |
+          echo "=========================================="
+          echo "ENVIRONMENT"
+          echo "=========================================="
+
+          echo ""
+          echo "--- URL ---"
+          printf '%s\n' "$URL"
+
+          echo ""
+          echo "--- URL shell escaped ---"
+          printf '%q\n' "$URL"
+
+          echo ""
+          echo "--- URL length ---"
+          printf '%s' "$URL" | wc -c
+
+          echo ""
+          echo "--- yt-dlp ---"
+          yt-dlp --version
+
+          echo ""
+          echo "--- Python ---"
+          python --version
+
+          echo ""
+          echo "--- Deno ---"
+          deno --version
+
+          echo ""
+          echo "--- curl-cffi ---"
+          python -m pip show curl-cffi | grep -E '^(Name|Version):'
+
+          echo ""
+          echo "--- yt-dlp-ejs ---"
+          python -m pip show yt-dlp-ejs | grep -E '^(Name|Version):'
+
+      - name: Test format extraction
+        env:
+          URL: ${{ inputs.url }}
+        run: |
+          echo "=========================================="
+          echo "TEST 1/2 - FORMAT EXTRACTION"
+          echo "=========================================="
+
+          yt-dlp \
+            -v \
+            -F \
+            --impersonate chrome \
+            --js-runtimes deno \
+            "$URL"
+
+      - name: Test REAL download
+        env:
+          URL: ${{ inputs.url }}
+        run: |
+          echo "=========================================="
+          echo "TEST 2/2 - REAL DOWNLOAD"
+          echo "=========================================="
+
+          rm -f archive.txt
+
+          yt-dlp \
+            -v \
+            --impersonate chrome \
+            --js-runtimes deno \
+            -f "bestvideo[height<=480]+bestaudio/best" \
+            --retries 10 \
+            --fragment-retries 10 \
+            -c \
+            -o "%(title)s.%(ext)s" \
+            "$URL"
+
+      - name: Show downloaded files
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "DOWNLOADED FILES"
+          echo "=========================================="
+
+          find . -maxdepth 2 -type f \
+            \( -name "*.mp4" -o -name "*.webm" -o -name "*.mkv" \) \
+            -printf '%p - %s bytes\n' \
+            || true
+
+      - name: Upload downloaded video
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yt-dlp-test-video
+          path: |
+            *.mp4
+            *.webm
+            *.mkv
+          if-no-files-found: error
