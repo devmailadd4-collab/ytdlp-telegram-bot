@@ -14,11 +14,11 @@ jobs:
       - name: Delete completed workflow runs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           echo "Current workflow run: $GITHUB_RUN_ID"
 
           gh run list \
-            --repo "$GITHUB_REPOSITORY" \
             --limit 1000 \
             --json databaseId,status,name \
             --jq '.[] | select(.status != "in_progress" and .status != "queued") | "\(.databaseId)|\(.status)|\(.name)"' |
@@ -34,9 +34,9 @@ jobs:
       - name: Delete old archive caches
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh cache list \
-            --repo "$GITHUB_REPOSITORY" \
             --key yt-dlp-archive- \
             --json id \
             --jq '.[].id' |
