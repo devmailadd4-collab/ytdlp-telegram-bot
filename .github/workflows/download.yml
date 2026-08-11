@@ -83,8 +83,12 @@ jobs:
             -d chat_id="${{ github.event.client_payload.chat_id }}" \
             -d text="❌ Échec du téléchargement (avec et sans cookies) : ${{ matrix.url }}"
 
+      - name: Create folder if needed
+        if: steps.download.outputs.success == 'true'
+        run: rclone mkdir "meta_bot:${{ github.event.client_payload.folder }}"
+
       - name: Upload
         if: steps.download.outputs.success == 'true'
         run: |
-          rclone move . gdrive:Videos \
+          rclone move . "meta_bot:${{ github.event.client_payload.folder }}" \
             --include "*.mp4" --include "*.webm" --include "*.mkv"
