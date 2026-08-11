@@ -72,6 +72,7 @@ jobs:
 
           echo "Échec des trois tentatives"
           echo "success=false" >> "$GITHUB_OUTPUT"
+          exit 1
 
       - name: Save archive cache
         if: always()
@@ -96,3 +97,24 @@ jobs:
         run: |
           rclone move . "mega_bot:${{ github.event.client_payload.folder }}" \
             --include "*.mp4" --include "*.webm" --include "*.mkv"
+
+  notify_batch_done:
+    needs: download
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify batch completion
+        run: |
+          STATUS="${{ needs.download.result }}"
+          FOLDER="${{ github.event.client_payload.folder }}"
+          COUNT=$(echo '${{ toJSON(github.event.client_payload.urls) }}' | jq 'length')
+
+          if [ "$STATUS" = "success" ]; then
+            TEXT="✅ Lot terminé — $COUNT lien(s) traité(s) avec succès dans le dossier \"$FOLDER\"."
+          else
+            TEXT="⚠️ Lot terminé — $COUNT lien(s) traité(s), au moins un échec dans le dossier \"$FOLDER\" (voir messages précédents pour le détail)."
+          fi
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d chat_id="${{ github.event.client_payload.chat_id }}" \
+            -d text="$TEXT"
