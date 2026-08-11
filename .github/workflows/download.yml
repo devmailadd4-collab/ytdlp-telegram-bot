@@ -85,10 +85,10 @@ jobs:
 
       - name: Create folder if needed
         if: steps.download.outputs.success == 'true'
-        run: rclone mkdir "meta_bot:${{ github.event.client_payload.folder }}"
+        run: rclone mkdir "mega_bot:${{ github.event.client_payload.folder }}"
 
       - name: Upload
         if: steps.download.outputs.success == 'true'
         run: |
-          rclone move . "meta_bot:${{ github.event.client_payload.folder }}" \
+          rclone move . "mega_bot:${{ github.event.client_payload.folder }}" \
             --include "*.mp4" --include "*.webm" --include "*.mkv"
