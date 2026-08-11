@@ -1,4 +1,5 @@
 name: Download and Upload
+
 on:
   repository_dispatch:
     types: [new_download]
@@ -6,11 +7,13 @@ on:
 jobs:
   download:
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
         url: ${{ fromJSON(toJSON(github.event.client_payload.urls)) }}
       max-parallel: 2
       fail-fast: false
+
     steps:
       - name: Install tools
         run: |
@@ -21,12 +24,46 @@ jobs:
         run: |
           mkdir -p ~/.config/rclone
           echo "${{ secrets.RCLONE_CONF }}" > ~/.config/rclone/rclone.conf
-          
+
       - name: Install deno
-        run: curl -fsSL https://deno.land/install.sh | sh -s -- -y
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh -s -- -y
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+
+      - name: Check Deno
+        run: |
+          which deno
+          deno --version
+          yt-dlp --version
+
+      - name: Configure cookies
+        run: |
+          echo "${{ secrets.YT_COOKIES }}" > /tmp/youtube-cookies.txt
 
       - name: Download
-        run: yt-dlp -o "%(title)s.%(ext)s" "${{ matrix.url }}"
+        run: |
+          URL="${{ matrix.url }}"
+
+          if [[ "$URL" =~ ^https?://(www\.)?(youtube\.com|music\.youtube\.com|youtu\.be)/ ]]; then
+            echo "YouTube detected"
+
+            yt-dlp \
+              --js-runtimes deno \
+              --cookies /tmp/youtube-cookies.txt \
+              -o "%(title)s.%(ext)s" \
+              "$URL"
+          else
+            echo "Non-YouTube URL detected"
+
+            yt-dlp \
+              --js-runtimes deno \
+              -o "%(title)s.%(ext)s" \
+              "$URL"
+          fi
 
       - name: Upload
-        run: rclone move . gdrive:Videos --include "*.mp4" --include "*.webm" --include "*.mkv"
+        run: |
+          rclone move . gdrive:Videos \
+            --include "*.mp4" \
+            --include "*.webm" \
+            --include "*.mkv"
