@@ -1,53 +1,47 @@
 name: Cleanup workflow runs
-
 on:
-schedule:
-- cron: '0 3 * * *'
-workflow_dispatch: {}
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
 
 jobs:
-cleanup:
-runs-on: ubuntu-latest
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
 
-```
-permissions:
-  actions: write
+    steps:
+      - name: Delete completed workflow runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Current workflow run: $GITHUB_RUN_ID"
 
-steps:
-  - name: Delete completed workflow runs
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    run: |
-      echo "Current workflow run: $GITHUB_RUN_ID"
+          gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --limit 1000 \
+            --json databaseId,status,name \
+            --jq '.[] | select(.status != "in_progress" and .status != "queued") | "\(.databaseId)|\(.status)|\(.name)"' |
+          while IFS='|' read -r run_id status name; do
+            if [ "$run_id" = "$GITHUB_RUN_ID" ]; then
+              echo "Skipping current run: $run_id"
+              continue
+            fi
+            echo "Deleting: $run_id | $status | $name"
+            gh run delete "$run_id" || true
+          done
 
-      gh run list \
-        --repo "$GITHUB_REPOSITORY" \
-        --limit 1000 \
-        --json databaseId,status,name \
-        --jq '.[] | select(.status != "in_progress" and .status != "queued") | "\(.databaseId)|\(.status)|\(.name)"' |
-      while IFS='|' read -r run_id status name; do
-        # Ne jamais supprimer l'exécution actuelle
-        if [ "$run_id" = "$GITHUB_RUN_ID" ]; then
-          echo "Skipping current run: $run_id"
-          continue
-        fi
-
-        echo "Deleting: $run_id | $status | $name"
-        gh run delete "$run_id" --confirm || true
-      done
-
-  - name: Delete old archive caches
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    run: |
-      gh cache list \
-        --repo "$GITHUB_REPOSITORY" \
-        --key yt-dlp-archive- \
-        --json id \
-        --jq '.[].id' |
-      while read -r id; do
-        [ -z "$id" ] && continue
-        echo "Deleting cache: $id"
-        gh cache delete "$id" --confirm || true
-      done
-```
+      - name: Delete old archive caches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh cache list \
+            --repo "$GITHUB_REPOSITORY" \
+            --key yt-dlp-archive- \
+            --json id \
+            --jq '.[].id' |
+          while read -r id; do
+            [ -z "$id" ] && continue
+            echo "Deleting cache: $id"
+            gh cache delete "$id" || true
+          done
