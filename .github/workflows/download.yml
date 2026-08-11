@@ -21,6 +21,9 @@ jobs:
         run: |
           mkdir -p ~/.config/rclone
           echo "${{ secrets.RCLONE_CONF }}" > ~/.config/rclone/rclone.conf
+          
+      - name: Install deno
+        run: curl -fsSL https://deno.land/install.sh | sh -s -- -y
 
       - name: Download
         run: yt-dlp -o "%(title)s.%(ext)s" "${{ matrix.url }}"
