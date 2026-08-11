@@ -4,8 +4,13 @@ on:
     types: [new_download]
 
 jobs:
-  run:
+  download:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        url: ${{ fromJSON(toJSON(github.event.client_payload.urls)) }}
+      max-parallel: 2
+      fail-fast: false
     steps:
       - name: Install tools
         run: |
@@ -18,7 +23,7 @@ jobs:
           echo "${{ secrets.RCLONE_CONF }}" > ~/.config/rclone/rclone.conf
 
       - name: Download
-        run: yt-dlp -o "%(title)s.%(ext)s" "${{ github.event.client_payload.url }}"
+        run: yt-dlp -o "%(title)s.%(ext)s" "${{ matrix.url }}"
 
       - name: Upload
-        run: rclone move . mega_bot:Videos --include "*.mp4" --include "*.webm"
+        run: rclone move . gdrive:Videos --include "*.mp4" --include "*.webm" --include "*.mkv"
