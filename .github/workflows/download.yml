@@ -1,4 +1,5 @@
 name: Download and Upload
+
 on:
   repository_dispatch:
     types: [new_download]
@@ -6,6 +7,7 @@ on:
 jobs:
   download:
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
         url: ${{ fromJSON(toJSON(github.event.client_payload.urls)) }}
@@ -13,23 +15,64 @@ jobs:
       fail-fast: false
 
     steps:
+
+      # ─────────────────────────────────────────────
+      # INSTALLATION
+      # ─────────────────────────────────────────────
+
       - name: Install tools
         run: |
           pip install -U "yt-dlp[default,curl-cffi]"
           curl https://rclone.org/install.sh | sudo bash
 
+      # ─────────────────────────────────────────────
+      # RCLONE
+      # ─────────────────────────────────────────────
+
       - name: Configure rclone
+        env:
+          RCLONE_CONF_B64: ${{ secrets.RCLONE_CONF_B64 }}
         run: |
           mkdir -p ~/.config/rclone
-          echo "${{ secrets.RCLONE_CONF }}" > ~/.config/rclone/rclone.conf
+
+          printf '%s' "$RCLONE_CONF_B64" \
+            | base64 -d \
+            > ~/.config/rclone/rclone.conf
+
+          chmod 600 ~/.config/rclone/rclone.conf
+
+          echo "Remotes configurés :"
+          rclone listremotes
+
+          echo "Test Google Drive..."
+          rclone about gdrive_bot:
+
+          echo "Test MEGA..."
+          rclone about mega_bot:
+
+          echo "Test Union..."
+          rclone about cloud:
+
+      # ─────────────────────────────────────────────
+      # DENO
+      # ─────────────────────────────────────────────
 
       - name: Install deno
         run: |
           curl -fsSL https://deno.land/install.sh | sh -s -- -y
           echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
 
+      # ─────────────────────────────────────────────
+      # COOKIES YOUTUBE
+      # ─────────────────────────────────────────────
+
       - name: Configure cookies
-        run: echo "${{ secrets.YT_COOKIES }}" > /tmp/youtube-cookies.txt
+        run: |
+          echo "${{ secrets.YT_COOKIES }}" > /tmp/youtube-cookies.txt
+
+      # ─────────────────────────────────────────────
+      # ARCHIVE CACHE
+      # ─────────────────────────────────────────────
 
       - name: Restore archive cache
         uses: actions/cache/restore@v4
@@ -38,27 +81,43 @@ jobs:
           key: yt-dlp-archive-
           restore-keys: yt-dlp-archive-
 
+      # ─────────────────────────────────────────────
+      # DOWNLOAD
+      # ─────────────────────────────────────────────
+
       - name: Download
         id: download
         env:
           RAW_URL: ${{ matrix.url }}
         run: |
+
           URL="$(printf '%s' "$RAW_URL" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
 
+          # Conversion éventuelle d'un lien Markdown
           if printf '%s' "$URL" | grep -qE '^\[https?://.*\]\(https?://.*\)$'; then
             URL="$(printf '%s' "$URL" | sed -E 's/^\[[^]]*\]\((https?:\/\/[^)]*)\).*/\1/')"
           fi
 
+          # Nettoyage des caractères échappés
           URL="$(printf '%s' "$URL" | sed \
-            -e 's/\\_/_/g' -e 's/\\-/-/g' -e 's/\\\*/*/g' \
-            -e 's/\\(/(/g' -e 's/\\)/)/g' -e 's/\\\[/[/g' -e 's/\\]/]/g')"
+            -e 's/\\_/_/g' \
+            -e 's/\\-/-/g' \
+            -e 's/\\\*/*/g' \
+            -e 's/\\(/(/g' \
+            -e 's/\\)/)/g' \
+            -e 's/\\\[/[/g' \
+            -e 's/\\]/]/g')"
 
           echo "URL nettoyée : $URL"
 
+          # Vérification URL
           if [[ ! "$URL" =~ ^https?:// ]]; then
             echo "ERREUR : URL invalide, abandon"
+
             echo "success=false" >> "$GITHUB_OUTPUT"
+
             echo "$RAW_URL — raison: URL invalide" > failed_url.txt
+
             exit 0
           fi
 
@@ -75,23 +134,52 @@ jobs:
             -o "%(title)s.%(ext)s"
           )
 
+          # ─────────────────────────────────────────
+          # TENTATIVE 1
+          # ─────────────────────────────────────────
+
           echo "Tentative 1/3 : sans cookies"
+
           if yt-dlp "${COMMON_FLAGS[@]}" "$URL"; then
             echo "success=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          # ─────────────────────────────────────────
+          # TENTATIVE 2
+          # ─────────────────────────────────────────
+
           echo "Tentative 2/3 : avec cookies"
-          if yt-dlp --cookies /tmp/youtube-cookies.txt "${COMMON_FLAGS[@]}" "$URL"; then
+
+          if yt-dlp \
+            --cookies /tmp/youtube-cookies.txt \
+            "${COMMON_FLAGS[@]}" \
+            "$URL"; then
+
             echo "success=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          # ─────────────────────────────────────────
+          # DIAGNOSTIC
+          # ─────────────────────────────────────────
+
           echo "Tentative 3/3 : diagnostic verbose"
-          yt-dlp -v -F --impersonate chrome --js-runtimes deno "$URL" 2>&1 | tail -n 40 || true
+
+          yt-dlp \
+            -v \
+            -F \
+            --impersonate chrome \
+            --js-runtimes deno \
+            "$URL" 2>&1 | tail -n 40 || true
 
           echo "success=false" >> "$GITHUB_OUTPUT"
+
           echo "$URL — raison: échec téléchargement" > failed_url.txt
+
+      # ─────────────────────────────────────────────
+      # SAVE ARCHIVE
+      # ─────────────────────────────────────────────
 
       - name: Save archive cache
         if: always()
@@ -100,29 +188,64 @@ jobs:
           path: archive.txt
           key: yt-dlp-archive-${{ github.run_id }}
 
+      # ─────────────────────────────────────────────
+      # CHECK STORAGE
+      # ─────────────────────────────────────────────
+
       - name: Check storage space
         id: check_space
         if: steps.download.outputs.success == 'true'
         run: |
-          FREE=$(rclone about cloud: --json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('free', -1))" || echo -1)
-          NEEDED=$(du -sb . --exclude=archive.txt 2>/dev/null | cut -f1)
 
-          echo "Espace libre: $FREE octets, besoin: $NEEDED octets"
+          echo "Vérification de l'espace disponible sur Union..."
+
+          FREE=$(rclone about cloud: --json 2>/dev/null \
+            | python3 -c \
+              "import json,sys; print(json.load(sys.stdin).get('free', -1))" \
+            || echo -1)
+
+          NEEDED=$(du -sb . --exclude=archive.txt 2>/dev/null \
+            | cut -f1)
+
+          echo "Espace libre Union : $FREE octets"
+          echo "Espace nécessaire : $NEEDED octets"
 
           if [ "$FREE" = "-1" ]; then
-            echo "⚠️ Impossible de vérifier l'espace (remote ne supporte peut-être pas 'about'), on continue sans bloquer"
+
+            echo "⚠️ Impossible de vérifier l'espace."
+
             echo "full=false" >> "$GITHUB_OUTPUT"
+
           elif [ "$FREE" -lt "$NEEDED" ]; then
+
+            echo "❌ Espace insuffisant."
+
             echo "full=true" >> "$GITHUB_OUTPUT"
+
           else
+
+            echo "✅ Espace suffisant."
+
             echo "full=false" >> "$GITHUB_OUTPUT"
+
           fi
+
+      # ─────────────────────────────────────────────
+      # STORAGE FULL
+      # ─────────────────────────────────────────────
 
       - name: Record storage full as failure
         if: steps.check_space.outputs.full == 'true'
         run: |
-          echo "${{ matrix.url }} — raison: stockage plein" > failed_url.txt
+
+          echo "${{ matrix.url }} — raison: stockage plein" \
+            > failed_url.txt
+
           echo "STORAGE_FULL=true" >> "$GITHUB_ENV"
+
+      # ─────────────────────────────────────────────
+      # FAILED URL ARTIFACT
+      # ─────────────────────────────────────────────
 
       - name: Upload failed URL as artifact
         if: steps.download.outputs.success == 'false' || steps.check_space.outputs.full == 'true'
@@ -132,21 +255,51 @@ jobs:
           path: failed_url.txt
           retention-days: 1
 
+      # ─────────────────────────────────────────────
+      # CREATE FOLDER ON UNION
+      # ─────────────────────────────────────────────
+
       - name: Create folder if needed
         if: steps.download.outputs.success == 'true' && steps.check_space.outputs.full != 'true'
-        run: rclone mkdir "cloud:${{ github.event.client_payload.folder }}"
+        run: |
+
+          rclone mkdir \
+            "cloud:${{ github.event.client_payload.folder }}"
+
+      # ─────────────────────────────────────────────
+      # UPLOAD TO UNION
+      # ─────────────────────────────────────────────
 
       - name: Upload
         if: steps.download.outputs.success == 'true' && steps.check_space.outputs.full != 'true'
         run: |
-          rclone move . "cloud:${{ github.event.client_payload.folder }}" \
-            --include "*.mp4" --include "*.webm" --include "*.mkv"
+
+          echo "Upload vers Union..."
+
+          rclone move . \
+            "cloud:${{ github.event.client_payload.folder }}" \
+            --include "*.mp4" \
+            --include "*.webm" \
+            --include "*.mkv"
+
+          echo "✅ Upload terminé."
+
+
+  # ═══════════════════════════════════════════════════
+  # NOTIFICATION DU LOT
+  # ═══════════════════════════════════════════════════
 
   notify_batch_done:
     needs: download
     if: always()
     runs-on: ubuntu-latest
+
     steps:
+
+      # ─────────────────────────────────────────────
+      # DOWNLOAD FAILED ARTIFACTS
+      # ─────────────────────────────────────────────
+
       - name: Download failed URL artifacts
         uses: actions/download-artifact@v4
         continue-on-error: true
@@ -155,40 +308,85 @@ jobs:
           path: failed_urls
           merge-multiple: true
 
+      # ─────────────────────────────────────────────
+      # SUMMARY + TELEGRAM + WORKER
+      # ─────────────────────────────────────────────
+
       - name: Build summary, notify and report to Worker
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
         run: |
-          FOLDER="${{ github.event.client_payload.folder }}"
-          CHAT_ID="${{ github.event.client_payload.chat_id }}"
-          JOB_ID="${{ github.event.client_payload.job_id }}"
-          COUNT=$(echo '${{ toJSON(github.event.client_payload.urls) }}' | jq 'length')
 
-          if [ -d failed_urls ] && [ "$(ls -A failed_urls 2>/dev/null)" ]; then
-            cat failed_urls/*.txt > failed_links.txt 2>/dev/null || true
-            FAIL_COUNT=$(wc -l < failed_links.txt | tr -d ' ')
+          FOLDER="${{ github.event.client_payload.folder }}"
+
+          CHAT_ID="${{ github.event.client_payload.chat_id }}"
+
+          JOB_ID="${{ github.event.client_payload.job_id }}"
+
+          COUNT=$(echo '${{ toJSON(github.event.client_payload.urls) }}' \
+            | jq 'length')
+
+          # ─────────────────────────────────────────
+          # FAILED URLS
+          # ─────────────────────────────────────────
+
+          if [ -d failed_urls ] \
+            && [ "$(ls -A failed_urls 2>/dev/null)" ]; then
+
+            cat failed_urls/*.txt \
+              > failed_links.txt 2>/dev/null || true
+
+            FAIL_COUNT=$(wc -l < failed_links.txt \
+              | tr -d ' ')
+
           else
+
             FAIL_COUNT=0
+
           fi
+
           SUCCESS_COUNT=$((COUNT - FAIL_COUNT))
 
+          # ─────────────────────────────────────────
+          # TELEGRAM
+          # ─────────────────────────────────────────
+
           if [ "$FAIL_COUNT" -eq 0 ]; then
+
             TEXT="✅ Lot terminé — $COUNT lien(s) traité(s) avec succès dans le dossier \"$FOLDER\"."
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-              -d chat_id="$CHAT_ID" -d text="$TEXT"
+
+            curl -s -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+              -d chat_id="$CHAT_ID" \
+              -d text="$TEXT"
+
           else
+
             TEXT="⚠️ Lot terminé — $SUCCESS_COUNT/$COUNT lien(s) réussis dans \"$FOLDER\". $FAIL_COUNT échec(s), liste jointe."
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-              -d chat_id="$CHAT_ID" -d text="$TEXT"
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
-              -F chat_id="$CHAT_ID" -F document=@failed_links.txt
+
+            curl -s -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+              -d chat_id="$CHAT_ID" \
+              -d text="$TEXT"
+
+            curl -s -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
+              -F chat_id="$CHAT_ID" \
+              -F document=@failed_links.txt
+
           fi
 
-          # Si ce lot fait partie d'un traitement multi-lots, informer le Worker pour le bilan global
+          # ─────────────────────────────────────────
+          # CALLBACK WORKER
+          # ─────────────────────────────────────────
+
           if [ -n "$JOB_ID" ] && [ "$JOB_ID" != "null" ]; then
-            curl -s -X POST "https://nameless-queen-7e04.devmailadd4.workers.dev/batch-complete" \
+
+            curl -s -X POST \
+              "https://nameless-queen-7e04.devmailadd4.workers.dev/batch-complete" \
               -H "Content-Type: application/json" \
               -H "X-Callback-Secret: $CALLBACK_SECRET" \
               -d "{\"job_id\":\"$JOB_ID\",\"success\":$SUCCESS_COUNT,\"failed\":$FAIL_COUNT}"
+
           fi
