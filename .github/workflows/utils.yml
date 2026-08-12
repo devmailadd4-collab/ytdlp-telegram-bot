@@ -28,7 +28,7 @@ jobs:
 
           case "$COMMAND" in
             status)
-              INFO=$(rclone about mega_bot: --json)
+              INFO=$(rclone about cloud: --json)
               TOTAL=$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['total'])")
               USED=$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['used'])")
               FREE=$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['free'])")
@@ -40,7 +40,7 @@ jobs:
               send "$MSG"
               ;;
             folders)
-              LIST=$(rclone lsf mega_bot: --dirs-only 2>/dev/null)
+              LIST=$(rclone lsf cloud: --dirs-only 2>/dev/null)
               if [ -z "$LIST" ]; then
                 send "📁 Aucun dossier trouvé sur le stockage."
               else
