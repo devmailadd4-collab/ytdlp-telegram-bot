@@ -51,43 +51,69 @@ jobs:
               > /dev/null
           }
 
+          format_storage() {
+            REMOTE="$1"
+            LABEL="$2"
+
+            INFO=$(rclone about "$REMOTE:" --json 2>/dev/null)
+
+            if [ -z "$INFO" ]; then
+              printf "❌ %s : impossible de récupérer les informations\n" "$LABEL"
+              return
+            fi
+
+            TOTAL=$(echo "$INFO" | python3 -c \
+              "import json,sys; print(json.load(sys.stdin).get('total',0))")
+
+            USED=$(echo "$INFO" | python3 -c \
+              "import json,sys; print(json.load(sys.stdin).get('used',0))")
+
+            FREE=$(echo "$INFO" | python3 -c \
+              "import json,sys; print(json.load(sys.stdin).get('free',0))")
+
+            TOTAL_GB=$(python3 -c \
+              "print(round($TOTAL / 1024**3, 2))")
+
+            USED_GB=$(python3 -c \
+              "print(round($USED / 1024**3, 2))")
+
+            FREE_GB=$(python3 -c \
+              "print(round($FREE / 1024**3, 2))")
+
+            if [ "$TOTAL" -gt 0 ]; then
+              PERCENT=$(python3 -c \
+                "print(round($USED / $TOTAL * 100, 1))")
+            else
+              PERCENT="0"
+            fi
+
+            printf "📦 %s\nUtilisé : %s Go / %s Go (%s%%)\nLibre : %s Go\n\n" \
+              "$LABEL" \
+              "$USED_GB" \
+              "$TOTAL_GB" \
+              "$PERCENT" \
+              "$FREE_GB"
+          }
+
           case "$COMMAND" in
 
             status)
-              INFO=$(rclone about cloud: --json)
 
-              TOTAL=$(echo "$INFO" | python3 -c \
-                "import json,sys; print(json.load(sys.stdin)['total'])")
+              MSG="💾 ÉTAT DU STOCKAGE\n\n"
 
-              USED=$(echo "$INFO" | python3 -c \
-                "import json,sys; print(json.load(sys.stdin)['used'])")
+              STORAGE_MEGA=$(format_storage "mega_bot" "MEGA")
+              STORAGE_GOOGLE=$(format_storage "gdrive_bot" "Google Drive")
+              STORAGE_UNION=$(format_storage "cloud" "UNION")
 
-              FREE=$(echo "$INFO" | python3 -c \
-                "import json,sys; print(json.load(sys.stdin)['free'])")
-
-              TOTAL_GB=$(python3 -c \
-                "print(round($TOTAL / 1024**3, 2))")
-
-              USED_GB=$(python3 -c \
-                "print(round($USED / 1024**3, 2))")
-
-              FREE_GB=$(python3 -c \
-                "print(round($FREE / 1024**3, 2))")
-
-              PERCENT=$(python3 -c \
-                "print(round($USED / $TOTAL * 100, 1))")
-
-              MSG=$(printf \
-                "💾 Stockage Cloud\nUtilisé : %s Go / %s Go (%s%%)\nLibre : %s Go" \
-                "$USED_GB" \
-                "$TOTAL_GB" \
-                "$PERCENT" \
-                "$FREE_GB")
+              MSG="${MSG}${STORAGE_MEGA}"
+              MSG="${MSG}${STORAGE_GOOGLE}"
+              MSG="${MSG}☁️ Vue globale\n${STORAGE_UNION}"
 
               send "$MSG"
               ;;
 
             folders)
+
               LIST=$(rclone lsf cloud: --dirs-only 2>/dev/null)
 
               if [ -z "$LIST" ]; then
@@ -98,7 +124,7 @@ jobs:
                   | sed 's/^/• /')
 
                 MSG=$(printf \
-                  "📁 Dossiers existants :\n%s" \
+                  "📁 Dossiers existants :\n\n%s" \
                   "$FORMATTED")
 
                 send "$MSG"
@@ -106,7 +132,9 @@ jobs:
               ;;
 
             *)
+
               send "⚠️ Commande inconnue."
+
               ;;
 
           esac
