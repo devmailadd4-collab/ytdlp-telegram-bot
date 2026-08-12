@@ -1,5 +1,4 @@
 name: Download and Upload
-
 on:
   repository_dispatch:
     types: [new_download]
@@ -7,7 +6,6 @@ on:
 jobs:
   download:
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         url: ${{ fromJSON(toJSON(github.event.client_payload.urls)) }}
@@ -17,7 +15,7 @@ jobs:
     steps:
       - name: Install tools
         run: |
-          python -m pip install -U "yt-dlp[default,curl-cffi]"
+          pip install -U "yt-dlp[default,curl-cffi]"
           curl https://rclone.org/install.sh | sudo bash
 
       - name: Configure rclone
@@ -31,82 +29,49 @@ jobs:
           echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
 
       - name: Configure cookies
-        run: |
-          echo "${{ secrets.YT_COOKIES }}" > /tmp/youtube-cookies.txt
+        run: echo "${{ secrets.YT_COOKIES }}" > /tmp/youtube-cookies.txt
 
       - name: Restore archive cache
         uses: actions/cache/restore@v4
         with:
           path: archive.txt
           key: yt-dlp-archive-
-          restore-keys: |
-            yt-dlp-archive-
+          restore-keys: yt-dlp-archive-
 
-      # ============================================================
-      # DIAGNOSTIC
-      # ============================================================
-      - name: Diagnostic URL
-        run: |
-          URL="${{ matrix.url }}"
-
-          echo "=========================================="
-          echo "DIAGNOSTIC URL"
-          echo "=========================================="
-
-          echo ""
-          echo "--- URL normale ---"
-          printf '%s\n' "$URL"
-
-          echo ""
-          echo "--- URL shell-escaped ---"
-          printf '%q\n' "$URL"
-
-          echo ""
-          echo "--- Longueur ---"
-          printf '%s' "$URL" | wc -c
-
-          echo ""
-          echo "--- Caractères / octets ---"
-          printf '%s' "$URL" | od -An -tx1c
-
-          echo ""
-          echo "--- Début / fin ---"
-          printf 'START=<%s>\n' "${URL:0:30}"
-          printf 'END=<%s>\n' "${URL: -30}"
-
-          echo ""
-          echo "--- yt-dlp version ---"
-          yt-dlp --version
-
-          echo ""
-          echo "--- Deno version ---"
-          deno --version
-
-          echo ""
-          echo "--- curl-cffi ---"
-          python -m pip show curl-cffi | grep -E '^(Name|Version):' || true
-
-          echo ""
-          echo "--- yt-dlp-ejs ---"
-          python -m pip show yt-dlp-ejs | grep -E '^(Name|Version):' || true
-
-          echo ""
-          echo "=========================================="
-          echo "TEST yt-dlp -F"
-          echo "=========================================="
-
-          yt-dlp -v -F \
-            --impersonate chrome \
-            --js-runtimes deno \
-            "$URL"
-
-      # ============================================================
-      # DOWNLOAD
-      # ============================================================
       - name: Download
         id: download
+        env:
+          RAW_URL: ${{ matrix.url }}
         run: |
-          URL="${{ matrix.url }}"
+          # --- Sanitization défensive de l'URL ---
+          URL="$(printf '%s' "$RAW_URL" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+
+          # Si l'URL arrive sous forme Markdown [texte](url), extraire l'url réelle
+          if printf '%s' "$URL" | grep -qE '^\[https?://.*\]\(https?://.*\)$'; then
+            URL="$(printf '%s' "$URL" | sed -E 's/^\[[^]]*\]\((https?:\/\/[^)]*)\).*/\1/')"
+          fi
+
+          # Désescape des caractères Markdown courants (remplacements explicites, pas de classe regex fragile)
+          URL="$(printf '%s' "$URL" | sed \
+            -e 's/\\_/_/g' \
+            -e 's/\\-/-/g' \
+            -e 's/\\\*/*/g' \
+            -e 's/\\(/(/g' \
+            -e 's/\\)/)/g' \
+            -e 's/\\\[/[/g' \
+            -e 's/\\]/]/g')"
+
+          echo "URL brute    : $RAW_URL"
+          echo "URL nettoyée : $URL"
+          if [ "$RAW_URL" != "$URL" ]; then
+            echo "⚠️ L'URL a été modifiée par la sanitization"
+          fi
+
+          if [[ ! "$URL" =~ ^https?:// ]]; then
+            echo "ERREUR : URL invalide après sanitization, abandon"
+            echo "success=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
 
           touch archive.txt
 
@@ -121,50 +86,25 @@ jobs:
             -o "%(title)s.%(ext)s"
           )
 
-          echo "=========================================="
-          echo "Tentative 1/3 : sans cookies"
-          echo "=========================================="
-
+          echo "Tentative 1/3 : sans cookies, avec impersonation Chrome"
           if yt-dlp "${COMMON_FLAGS[@]}" "$URL"; then
             echo "success=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo ""
-          echo "=========================================="
-          echo "Tentative 2/3 : avec cookies"
-          echo "=========================================="
-
-          if yt-dlp \
-            --cookies /tmp/youtube-cookies.txt \
-            "${COMMON_FLAGS[@]}" \
-            "$URL"; then
-
+          echo "Tentative 2/3 : avec cookies, avec impersonation Chrome"
+          if yt-dlp --cookies /tmp/youtube-cookies.txt "${COMMON_FLAGS[@]}" "$URL"; then
             echo "success=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo ""
-          echo "=========================================="
-          echo "Tentative 3/3 : diagnostic final"
-          echo "=========================================="
+          echo "Tentative 3/3 : diagnostic verbose (pour comprendre l'échec, pas de retéléchargement)"
+          yt-dlp -v -F --impersonate chrome --js-runtimes deno "$URL" 2>&1 | tail -n 40 || true
 
-          yt-dlp \
-            -v \
-            -F \
-            --impersonate chrome \
-            --js-runtimes deno \
-            "$URL" 2>&1 | tail -n 100 || true
-
-          echo ""
           echo "Échec des trois tentatives"
-
           echo "success=false" >> "$GITHUB_OUTPUT"
           exit 1
 
-      # ============================================================
-      # SAVE ARCHIVE
-      # ============================================================
       - name: Save archive cache
         if: always()
         uses: actions/cache/save@v4
@@ -172,44 +112,27 @@ jobs:
           path: archive.txt
           key: yt-dlp-archive-${{ github.run_id }}
 
-      # ============================================================
-      # NOTIFICATION FAILURE
-      # ============================================================
       - name: Notify failure
         if: steps.download.outputs.success == 'false'
         run: |
-          curl -s -X POST \
-            "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d chat_id="${{ github.event.client_payload.chat_id }}" \
-            -d text="❌ Échec du téléchargement : ${{ matrix.url }}"
+            -d text="❌ Échec du téléchargement (sans cookies, avec cookies, avec impersonation) : ${{ matrix.url }}"
 
-      # ============================================================
-      # UPLOAD
-      # ============================================================
       - name: Create folder if needed
         if: steps.download.outputs.success == 'true'
-        run: |
-          rclone mkdir \
-            "mega_bot:${{ github.event.client_payload.folder }}"
+        run: rclone mkdir "mega_bot:${{ github.event.client_payload.folder }}"
 
       - name: Upload
         if: steps.download.outputs.success == 'true'
         run: |
-          rclone move . \
-            "mega_bot:${{ github.event.client_payload.folder }}" \
-            --include "*.mp4" \
-            --include "*.webm" \
-            --include "*.mkv"
+          rclone move . "mega_bot:${{ github.event.client_payload.folder }}" \
+            --include "*.mp4" --include "*.webm" --include "*.mkv"
 
-
-  # ================================================================
-  # BATCH NOTIFICATION
-  # ================================================================
   notify_batch_done:
     needs: download
     if: always()
     runs-on: ubuntu-latest
-
     steps:
       - name: Notify batch completion
         run: |
@@ -220,10 +143,9 @@ jobs:
           if [ "$STATUS" = "success" ]; then
             TEXT="✅ Lot terminé — $COUNT lien(s) traité(s) avec succès dans le dossier \"$FOLDER\"."
           else
-            TEXT="⚠️ Lot terminé — $COUNT lien(s) traité(s), au moins un échec dans le dossier \"$FOLDER\"."
+            TEXT="⚠️ Lot terminé — $COUNT lien(s) traité(s), au moins un échec dans le dossier \"$FOLDER\" (voir messages précédents pour le détail)."
           fi
 
-          curl -s -X POST \
-            "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d chat_id="${{ github.event.client_payload.chat_id }}" \
             -d text="$TEXT"
