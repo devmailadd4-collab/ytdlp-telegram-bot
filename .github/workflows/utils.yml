@@ -1,4 +1,5 @@
 name: Bot Utility Commands
+
 on:
   repository_dispatch:
     types: [bot_command]
@@ -6,14 +7,35 @@ on:
 jobs:
   run_command:
     runs-on: ubuntu-latest
+
     steps:
       - name: Install rclone
-        run: curl https://rclone.org/install.sh | sudo bash
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
 
       - name: Configure rclone
+        env:
+          RCLONE_CONF_B64: ${{ secrets.RCLONE_CONF_B64 }}
         run: |
           mkdir -p ~/.config/rclone
-          echo "${{ secrets.RCLONE_CONF }}" > ~/.config/rclone/rclone.conf
+
+          printf '%s' "$RCLONE_CONF_B64" \
+            | base64 -d \
+            > ~/.config/rclone/rclone.conf
+
+          chmod 600 ~/.config/rclone/rclone.conf
+
+          echo "Remotes configurés :"
+          rclone listremotes
+
+          echo "Test Google Drive..."
+          rclone about gdrive_bot:
+
+          echo "Test MEGA..."
+          rclone about mega_bot:
+
+          echo "Test Union..."
+          rclone about cloud:
 
       - name: Execute command
         env:
@@ -22,34 +44,69 @@ jobs:
           COMMAND: ${{ github.event.client_payload.command }}
         run: |
           send() {
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-              -d chat_id="$CHAT_ID" -d text="$1" > /dev/null
+            curl -s -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+              -d chat_id="$CHAT_ID" \
+              -d text="$1" \
+              > /dev/null
           }
 
           case "$COMMAND" in
+
             status)
               INFO=$(rclone about cloud: --json)
-              TOTAL=$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['total'])")
-              USED=$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['used'])")
-              FREE=$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['free'])")
-              TOTAL_GB=$(python3 -c "print(round($TOTAL / 1024**3, 2))")
-              USED_GB=$(python3 -c "print(round($USED / 1024**3, 2))")
-              FREE_GB=$(python3 -c "print(round($FREE / 1024**3, 2))")
-              PERCENT=$(python3 -c "print(round($USED / $TOTAL * 100, 1))")
-              MSG=$(printf "💾 Stockage Mega\nUtilisé : %s Go / %s Go (%s%%)\nLibre : %s Go" "$USED_GB" "$TOTAL_GB" "$PERCENT" "$FREE_GB")
+
+              TOTAL=$(echo "$INFO" | python3 -c \
+                "import json,sys; print(json.load(sys.stdin)['total'])")
+
+              USED=$(echo "$INFO" | python3 -c \
+                "import json,sys; print(json.load(sys.stdin)['used'])")
+
+              FREE=$(echo "$INFO" | python3 -c \
+                "import json,sys; print(json.load(sys.stdin)['free'])")
+
+              TOTAL_GB=$(python3 -c \
+                "print(round($TOTAL / 1024**3, 2))")
+
+              USED_GB=$(python3 -c \
+                "print(round($USED / 1024**3, 2))")
+
+              FREE_GB=$(python3 -c \
+                "print(round($FREE / 1024**3, 2))")
+
+              PERCENT=$(python3 -c \
+                "print(round($USED / $TOTAL * 100, 1))")
+
+              MSG=$(printf \
+                "💾 Stockage Cloud\nUtilisé : %s Go / %s Go (%s%%)\nLibre : %s Go" \
+                "$USED_GB" \
+                "$TOTAL_GB" \
+                "$PERCENT" \
+                "$FREE_GB")
+
               send "$MSG"
               ;;
+
             folders)
               LIST=$(rclone lsf cloud: --dirs-only 2>/dev/null)
+
               if [ -z "$LIST" ]; then
                 send "📁 Aucun dossier trouvé sur le stockage."
               else
-                FORMATTED=$(echo "$LIST" | sed 's/\/$//' | sed 's/^/• /')
-                MSG=$(printf "📁 Dossiers existants :\n%s" "$FORMATTED")
+                FORMATTED=$(echo "$LIST" \
+                  | sed 's/\/$//' \
+                  | sed 's/^/• /')
+
+                MSG=$(printf \
+                  "📁 Dossiers existants :\n%s" \
+                  "$FORMATTED")
+
                 send "$MSG"
               fi
               ;;
+
             *)
               send "⚠️ Commande inconnue."
               ;;
+
           esac
