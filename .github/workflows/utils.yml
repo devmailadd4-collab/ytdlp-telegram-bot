@@ -1,4 +1,5 @@
 name: Bot Utility Commands
+
 on:
   repository_dispatch:
     types: [bot_command]
@@ -6,9 +7,11 @@ on:
 jobs:
   run_command:
     runs-on: ubuntu-latest
+
     steps:
       - name: Install rclone
-        run: curl https://rclone.org/install.sh | sudo bash
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
 
       - name: Configure rclone
         run: |
@@ -22,13 +25,18 @@ jobs:
           COMMAND: ${{ github.event.client_payload.command }}
         run: |
           send() {
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-              -d chat_id="$CHAT_ID" -d text="$1" > /dev/null
+            curl -s -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+              -d chat_id="$CHAT_ID" \
+              --data-urlencode text="$1" \
+              > /dev/null
           }
 
           case "$COMMAND" in
+
             status)
               INFO=$(rclone about mega_bot: --json)
+
               TOTAL=$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['total'])")
               USED=$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['used'])")
               FREE=$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['free'])")
@@ -45,10 +53,12 @@ Libre : ${FREE_GB} Go"
 
             folders)
               LIST=$(rclone lsf mega_bot: --dirs-only 2>/dev/null)
+
               if [ -z "$LIST" ]; then
                 send "📁 Aucun dossier trouvé sur le stockage."
               else
-                FORMATTED=$(echo "$LIST" | sed 's/\/$//' | sed 's/^/• /')
+                FORMATTED=$(echo "$LIST" | sed 's#/$##' | sed 's/^/• /')
+
                 send "📁 Dossiers existants :
 $FORMATTED"
               fi
@@ -57,4 +67,5 @@ $FORMATTED"
             *)
               send "⚠️ Commande inconnue."
               ;;
+
           esac
