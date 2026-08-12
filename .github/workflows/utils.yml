@@ -99,15 +99,18 @@ jobs:
 
             status)
 
-              MSG="💾 ÉTAT DU STOCKAGE\n\n"
+              MSG=$'💾 ÉTAT DU STOCKAGE\n\n'
 
               STORAGE_MEGA=$(format_storage "mega_bot" "MEGA")
               STORAGE_GOOGLE=$(format_storage "gdrive_bot" "Google Drive")
               STORAGE_UNION=$(format_storage "cloud" "UNION")
 
-              MSG="${MSG}${STORAGE_MEGA}"
-              MSG="${MSG}${STORAGE_GOOGLE}"
-              MSG="${MSG}☁️ Vue globale\n${STORAGE_UNION}"
+              MSG+="$STORAGE_MEGA"
+              MSG+=$'\n'
+              MSG+="$STORAGE_GOOGLE"
+              MSG+=$'\n'
+              MSG+=$'☁️ Vue globale\n'
+              MSG+="$STORAGE_UNION"
 
               send "$MSG"
               ;;
