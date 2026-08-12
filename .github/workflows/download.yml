@@ -104,7 +104,7 @@ jobs:
         id: check_space
         if: steps.download.outputs.success == 'true'
         run: |
-          FREE=$(rclone about mega_bot: --json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('free', -1))" || echo -1)
+          FREE=$(rclone about cloud: --json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('free', -1))" || echo -1)
           NEEDED=$(du -sb . --exclude=archive.txt 2>/dev/null | cut -f1)
 
           echo "Espace libre: $FREE octets, besoin: $NEEDED octets"
@@ -134,12 +134,12 @@ jobs:
 
       - name: Create folder if needed
         if: steps.download.outputs.success == 'true' && steps.check_space.outputs.full != 'true'
-        run: rclone mkdir "mega_bot:${{ github.event.client_payload.folder }}"
+        run: rclone mkdir "cloud:${{ github.event.client_payload.folder }}"
 
       - name: Upload
         if: steps.download.outputs.success == 'true' && steps.check_space.outputs.full != 'true'
         run: |
-          rclone move . "mega_bot:${{ github.event.client_payload.folder }}" \
+          rclone move . "cloud:${{ github.event.client_payload.folder }}" \
             --include "*.mp4" --include "*.webm" --include "*.mkv"
 
   notify_batch_done:
